@@ -1,29 +1,36 @@
-use std::{cell::RefCell, rc::{Rc, Weak}};
+use std::{cell::RefCell, fmt::Display, rc::Rc};
 use crate::place::Place;
 
 
 #[derive(Debug)]
 pub struct User{
-    pub name: String,
-    pass: String,
+    name: String,
     id: u64,
-    pub place: Weak<RefCell<Place>>,
+    pub place: Rc<RefCell<Place>>,
     pub data: UserData
 }
 
 impl User {
-    pub fn new(name: String, pass: String, id: u64) -> User{
+    pub fn new(name: String, pass: String, id: u64, place: Rc<RefCell<Place>>) -> User{
         User {
-            name,
-            pass,
+            name: String::new(),
             id,
-            place: Weak::new(),
-            data: UserData::new(String::new(), String::new(), String::new())
+            place,
+            data: UserData::new(name, pass, String::new())
         }
     }
 
+    pub fn name(&self) -> String {
+        if !self.name.is_empty() {self.name.clone()}
+        else {self.data.login.clone()}
+    }
+
+    pub fn login(&self) -> String {
+        self.data.login.clone()
+    }
+
     pub fn pass(&self) -> String{
-        self.pass.clone()
+        self.data.pass.clone()
     }
 
     pub fn id(&self) -> u64 {
@@ -42,16 +49,22 @@ impl PartialEq for User {
     }
 }
 
+impl Display for User {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "User {}, login {}", self.name, self.data.login)
+    }
+}
+
 #[derive(Debug)]
 pub struct UserData {
     pass: String,
     login: String,
-    email: String,
-    friends: Vec<Rc<RefCell<User>>>
+    pub email: String,
+    pub friends: Vec<Rc<RefCell<User>>>
 }
 
 impl UserData {
-    pub fn new(pass: String, login: String, email: String) -> UserData {
+    pub fn new(login: String, pass: String, email: String) -> UserData {
         UserData {
             pass,
             login,
@@ -59,4 +72,5 @@ impl UserData {
             friends: vec![]
         }
     }
+
 }

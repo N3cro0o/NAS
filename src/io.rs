@@ -48,10 +48,5 @@ pub fn get_place_creation_data_from_console() -> String
     }
 
 pub fn sent_message(user: &User, place: &Place, message: &str){
-    let user_tag;
-    if user.id() == place.admin.borrow().id() {
-        user_tag = "Admin";
-    }
-    else {user_tag = "User";}
-    println!("{user_tag} {} said in {}: {}", user.name, place.name, message);
+    println!("User {} said in {}: {}", user.name(), place.name, message);
 }
