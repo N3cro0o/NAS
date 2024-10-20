@@ -1,17 +1,16 @@
 use std::{cell::RefCell, fmt::Display, rc::Rc};
-use crate::place::Place;
 
 
 #[derive(Debug)]
 pub struct User{
     name: String,
     id: u64,
-    pub place: Rc<RefCell<Place>>,
+    pub place: u64,
     pub data: UserData
 }
 
 impl User {
-    pub fn new(name: String, pass: String, id: u64, place: Rc<RefCell<Place>>) -> User{
+    pub fn new(name: String, pass: String, id: u64, place: u64) -> User{
         User {
             name: String::new(),
             id,
@@ -35,6 +34,10 @@ impl User {
 
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    pub fn change_nickname(&mut self, nickname: &str) {
+        self.name = nickname.to_string();
     }
 }
 

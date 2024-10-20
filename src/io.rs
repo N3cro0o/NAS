@@ -15,7 +15,7 @@ impl LoginData {
     }
 }
 
-pub fn get_name_and_pass_from_console(repeat_password: bool) -> LoginData
+pub fn get_name_and_pass_from_console(repeat_password: bool) -> Result<LoginData, ()>
     // Write error handling
 {
     let mut input = String::new();
@@ -32,8 +32,11 @@ pub fn get_name_and_pass_from_console(repeat_password: bool) -> LoginData
     if repeat_password {
         println!("Repeat password: ");
         io::stdin().read_line(&mut input).expect("Wrong data input");
+        if pass != input.trim() {
+            return Err(());
+        }
     }
-    LoginData(login, pass)
+    Ok(LoginData(login, pass))
 }
 
 pub fn get_place_creation_data_from_console() -> String 
@@ -45,7 +48,7 @@ pub fn get_place_creation_data_from_console() -> String
     io::stdin().read_line(&mut input).expect("Wrong data input");
     name = String::from(input.trim());
     name
-    }
+}
 
 pub fn sent_message(user: &User, place: &Place, message: &str){
     println!("User {} said in {}: {}", user.name(), place.name, message);

@@ -1,7 +1,13 @@
 use std::{cell::RefCell, fmt::Display, rc::{Rc, Weak}, time::SystemTime};
 use chrono::{DateTime, Local};
-use roles::RoleTrait;
+use roles::{RoleTemplate, RoleTrait};
 use super::user::User;
+
+/*
+    Change how admin fields work
+        Admin search in members field or just change data type
+
+*/
 
 pub mod roles {
     use std::u8;
@@ -21,7 +27,7 @@ pub mod roles {
         pub fn new(name: String, priority: u8) -> RoleTemplate {
             RoleTemplate {
                 name,
-                perms: RolePerms::new(true, priority)
+                perms: RolePerms::new(true, false, priority)
             }
         }
 
@@ -51,13 +57,15 @@ pub mod roles {
     #[derive(Debug, Clone)]
     pub struct RolePerms {
         pub can_talk: bool,
-        pub priority: u8
+        pub priority: u8,
+        pub change_nickname: bool
     }
 
     impl RolePerms {
-        pub fn new(message: bool, priority: u8) -> RolePerms {
+        pub fn new(message: bool, nickname: bool, priority: u8) -> RolePerms {
             RolePerms {
                 can_talk: message,
+                change_nickname: nickname,
                 priority
             }
         }
@@ -65,6 +73,7 @@ pub mod roles {
         pub fn new_admin() -> RolePerms {
             RolePerms {
                 can_talk: true,
+                change_nickname:  true,
                 priority: u8::MAX
             }
         }
@@ -84,6 +93,39 @@ pub mod roles {
     }
 }
 
+pub trait PlaceTrait {
+    fn add_user(&mut self, user: Rc<RefCell<User>>);
+    fn find_user_by_id(&self, id: u64) -> Option<&PlaceUser>;
+}
+
+#[derive(Debug)]
+pub struct DefaultPlace {
+    pub members: Vec<PlaceUser>,
+    admin: Vec<Rc<RefCell<User>>>,
+    messages: Vec<DefaultPlaceMessage>,
+    groups: Vec<DefaultPlaceGroup>,
+}
+
+#[derive(Debug)]
+pub struct PlaceMessage {
+    user: Weak<RefCell<User>>,
+    message: String,
+    time: SystemTime
+}
+
+#[derive(Debug)]
+pub struct DefaultPlaceMessage {
+    sender: Rc<RefCell<User>>,
+    message: String,
+    time: SystemTime
+}
+#[derive(Debug)]
+pub struct DefaultPlaceGroup {
+    messages: Vec<DefaultPlaceMessage>,
+    members: Vec<Rc<RefCell<User>>>,
+    name: String
+}
+
 #[derive(Debug)]
 pub struct Place {
     pub name: String,
@@ -92,6 +134,19 @@ pub struct Place {
     admin: Vec<Weak<RefCell<User>>>,
     pub messages: Vec<PlaceMessage>,
     roles: Vec<roles::RoleTemplate>
+}
+
+impl PlaceTrait for Place {
+    fn add_user(&mut self, user: Rc<RefCell<User>>){
+        let x = PlaceUser::new(Rc::downgrade(&user));
+        self.members.push(x);
+    }
+    fn find_user_by_id(&self, id: u64) -> Option<&PlaceUser> {
+        for user in self.members.iter(){
+            if user.user.upgrade().unwrap().borrow().id() == id {return Some(user);}
+        }
+        return None;   
+    }
 }
 
 impl Place {
@@ -118,11 +173,6 @@ impl Place {
         p
     }
 
-    pub fn add_user(&mut self, user: Rc<RefCell<User>>){
-        let x = PlaceUser::new(Rc::downgrade(&user));
-        self.members.push(x);
-    }
-
     pub fn add_admin(&mut self, user: Rc<RefCell<User>>) {
         let mut x = PlaceUser::new(Rc::downgrade(&user));
         x.add_admin_role();
@@ -135,13 +185,6 @@ impl Place {
     
     pub fn id(&self) -> u64 {
         self.id
-    }
-
-    pub fn find_user_by_id(&self, id: u64) -> Option<&PlaceUser> {
-        for user in self.members.iter(){
-            if user.user.upgrade().unwrap().borrow().id() == id {return Some(user);}
-        }
-        return None;
     }
 
     fn find_user_by_id_mut(&mut self, id: u64) -> Option<&mut PlaceUser> {
@@ -170,6 +213,14 @@ impl Place {
             }
         }
         target.return_perms()
+    }
+
+    pub fn return_user_roles(&self, user_id: u64) -> Result<&Vec<RoleTemplate>, &'static str> {
+        let user = match self.find_user_by_id(user_id) {
+            Some(x) => x,
+            None => {return Err("Error, can't find the user")}
+        };
+        Ok(user.return_roles())
     }
 
     pub fn update_roles(&mut self, user_id: u64, new_role: roles::RoleTemplate) -> Result<roles::RolePerms, &'static str> {
@@ -218,6 +269,15 @@ impl Place {
         user.add_role(new_role);
     }
 
+    pub fn change_user_nickname(&mut self, user_id: u64, new_nick: String) -> Result<(), &'static str> {
+        let user = self.find_user_by_id_mut(user_id);
+        if let None = user {
+            return Err("Cannot find user")
+        }
+        user.unwrap().place_nickname = new_nick;
+        Ok(())
+    }
+
     // Banicja methods
     pub fn ban_user(&mut self, user_id: u64) -> bool {
         let mut target_user: Option<&mut PlaceUser> = None;
@@ -242,11 +302,45 @@ impl Place {
     }
 }
 
-#[derive(Debug)]
-pub struct PlaceMessage {
-    user: Weak<RefCell<User>>,
-    message: String,
-    time: SystemTime
+impl DefaultPlace {
+    pub fn new() -> Self {
+        DefaultPlace{
+            members: vec![],
+            admin: vec![],
+            messages: vec![],
+            groups: vec![]
+        }
+    }
+
+    pub fn add_admin(&mut self, admin: Rc<RefCell<User>>) {
+        let mut admin_user = PlaceUser::new(Rc::downgrade(&admin));
+        admin_user.add_admin_role();
+        self.admin.push(Rc::clone(&admin));
+        self.members.push(admin_user);
+    }
+
+    pub fn is_admin(&self, user_id: u64) -> bool {
+        for ad in self.admin.iter() {
+            if ad.borrow().id() == user_id {return true}
+        }
+        false
+    }
+}
+
+impl PlaceTrait for DefaultPlace {
+    fn add_user(&mut self, user: Rc<RefCell<User>>) {
+        let x = PlaceUser::new(Rc::downgrade(&user));
+        self.members.push(x);
+    }
+
+    fn find_user_by_id(&self, id: u64) -> Option<&PlaceUser> {
+        for user in self.members.iter() {
+            if user.user().upgrade().unwrap().borrow().id() == id {
+                return Some(user)
+            }
+        }
+        None
+    }
 }
 
 impl PlaceMessage {
@@ -267,7 +361,8 @@ impl Display for PlaceMessage {
 
 #[derive(Debug)]
 pub struct PlaceUser {
-    pub user: Weak<RefCell<User>>,
+    user: Weak<RefCell<User>>,
+    pub place_nickname: String,
     pub roles: Vec<roles::RoleTemplate>,
     pub banned: bool
 }  
@@ -277,9 +372,14 @@ impl PlaceUser {
         let role = roles::RoleTemplate::new_basic();
         PlaceUser {
             user,
+            place_nickname: String::new(),
             roles: vec![role],
             banned: false
         }
+    }
+
+    pub fn user(&self) -> Weak<RefCell<User>>{
+        self.user.clone()
     }
 
     pub fn add_admin_role(&mut self) {
