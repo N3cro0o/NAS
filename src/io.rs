@@ -1,8 +1,6 @@
 use std::io;
 use crate::user::User;
-/*
-    26.10  4h30m
- */
+
 pub struct LoginData(String, String, String);
 
 impl LoginData {
