@@ -1,34 +1,46 @@
 use std::io;
 use crate::user::User;
-use super::place::Place;
-
-
-pub struct LoginData(String, String);
+/*
+    26.10  4h30m
+ */
+pub struct LoginData(String, String, String);
 
 impl LoginData {
     pub fn login(&self) -> String {
-            self.0.clone()
+        self.0.clone()
+    }
+
+    pub fn email(&self) -> String {
+        self.1.clone()
     }
 
     pub fn password(&self) -> String {
-        self.1.clone()
+        self.2.clone()
     }
 }
 
 pub fn get_name_and_pass_from_console(repeat_password: bool) -> Result<LoginData, ()>
-    // Write error handling
 {
     let mut input = String::new();
     let login;
     let pass;
-    println!("Please enter login and password:\nLogin: ");
+    let email;
+
+    println!("Please enter account data:\nLogin: ");
     io::stdin().read_line(&mut input).expect("Wrong data input");
     login = String::from(input.trim());
     input.clear();
+
+    println!("Email:");
+    io::stdin().read_line(&mut input).expect("Wrong data input");
+    email = String::from(input.trim());
+    input.clear();
+
     println!("Password: ");
     io::stdin().read_line(&mut input).expect("Wrong data input");
     pass = String::from(input.trim());
     input.clear();
+
     if repeat_password {
         println!("Repeat password: ");
         io::stdin().read_line(&mut input).expect("Wrong data input");
@@ -36,7 +48,25 @@ pub fn get_name_and_pass_from_console(repeat_password: bool) -> Result<LoginData
             return Err(());
         }
     }
-    Ok(LoginData(login, pass))
+    Ok(LoginData(login, email, pass))
+}
+
+pub fn get_logging_data_from_console() -> LoginData {
+    let mut input = String::new();
+    let login;
+    let pass;
+
+    println!("Please enter account data:\nLogin or email: ");
+    io::stdin().read_line(&mut input).expect("Wrong data input");
+    login = String::from(input.trim());
+    input.clear();
+
+    println!("Password: ");
+    io::stdin().read_line(&mut input).expect("Wrong data input");
+    pass = String::from(input.trim());
+    input.clear();
+
+    LoginData(login.clone(), login, pass)
 }
 
 pub fn get_place_creation_data_from_console() -> String 
@@ -50,6 +80,6 @@ pub fn get_place_creation_data_from_console() -> String
     name
 }
 
-pub fn sent_message(user: &User, place: &Place, message: &str){
-    println!("User {} said in {}: {}", user.name(), place.name, message);
+pub fn sent_message(user: &User, place: String, message: &str){
+    println!("User {} said in {}: {}", user.name(), place, message);
 }

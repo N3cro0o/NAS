@@ -1,6 +1,8 @@
-use std::{cell::RefCell, fmt::Display, rc::{Rc, Weak}, time::SystemTime};
+use std::{cell::RefCell, fmt::Display, hash::{Hash, Hasher}, rc::{Rc, Weak}, slice::Iter, time::SystemTime};
+use std::hash::DefaultHasher;
 use chrono::{DateTime, Local};
 use roles::{RoleTemplate, RoleTrait};
+
 use super::user::User;
 
 /*
@@ -102,11 +104,10 @@ pub trait PlaceTrait {
 pub struct DefaultPlace {
     pub members: Vec<PlaceUser>,
     admin: Vec<Rc<RefCell<User>>>,
-    messages: Vec<DefaultPlaceMessage>,
     groups: Vec<DefaultPlaceGroup>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PlaceMessage {
     user: Weak<RefCell<User>>,
     message: String,
@@ -114,24 +115,21 @@ pub struct PlaceMessage {
 }
 
 #[derive(Debug)]
-pub struct DefaultPlaceMessage {
-    sender: Rc<RefCell<User>>,
-    message: String,
-    time: SystemTime
-}
-#[derive(Debug)]
 pub struct DefaultPlaceGroup {
-    messages: Vec<DefaultPlaceMessage>,
+    id: u64,
+    messages: Vec<PlaceMessage>,
     members: Vec<Rc<RefCell<User>>>,
-    name: String
+    name: String,
+    default: bool
 }
 
 #[derive(Debug)]
 pub struct Place {
-    pub name: String,
+    name: String, // Public name, can be changed
     id: u64,
+    code: String, // Basically invite code
     pub members: Vec<PlaceUser>,
-    admin: Vec<Weak<RefCell<User>>>,
+    admins: Vec<Weak<RefCell<User>>>,
     pub messages: Vec<PlaceMessage>,
     roles: Vec<roles::RoleTemplate>
 }
@@ -140,7 +138,9 @@ impl PlaceTrait for Place {
     fn add_user(&mut self, user: Rc<RefCell<User>>){
         let x = PlaceUser::new(Rc::downgrade(&user));
         self.members.push(x);
+        user.borrow_mut().data.add_place(self.id);
     }
+
     fn find_user_by_id(&self, id: u64) -> Option<&PlaceUser> {
         for user in self.members.iter(){
             if user.user.upgrade().unwrap().borrow().id() == id {return Some(user);}
@@ -154,20 +154,23 @@ impl Place {
         // Default roles
         // Basic
         // Admin
-
+        let mut hasher = DefaultHasher::new();
+        let time = SystemTime::now();
+        time.hash(&mut hasher);
         let mut p = Place{
             name,
             members: vec![],
-            admin: vec![],
+            admins: vec![],
             id,
             messages: vec![],
             roles: vec![
                 roles::RoleTemplate::new_basic(),
                 roles::RoleTemplate::new_admin()
-            ]
+            ],
+            code: format!("{:x}", hasher.finish())
         };
         if let Some(user) = admin {
-            p.admin.push(Rc::downgrade(&user));
+            p.admins.push(Rc::downgrade(&user));
             p.add_admin(user);
         };
         p
@@ -186,6 +189,14 @@ impl Place {
     pub fn id(&self) -> u64 {
         self.id
     }
+    
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    pub fn change_name(&mut self, new_name: String) {
+        self.name = new_name;
+    } 
 
     fn find_user_by_id_mut(&mut self, id: u64) -> Option<&mut PlaceUser> {
         for user in self.members.iter_mut(){
@@ -195,10 +206,14 @@ impl Place {
     }
 
     pub fn find_admin(&self, id: u64) -> Option<Rc<RefCell<User>>> {
-        for user in self.admin.iter() {
+        for user in self.admins.iter() {
             if user.upgrade().unwrap().borrow().id() == id {return Some(user.upgrade().unwrap());}
         }
         return None
+    }
+
+    pub fn return_invite_infinite_code(&self) -> String {
+        self.code.clone()
     }
 
     // Roles and perms and shit
@@ -307,16 +322,20 @@ impl DefaultPlace {
         DefaultPlace{
             members: vec![],
             admin: vec![],
-            messages: vec![],
             groups: vec![]
         }
+    }
+
+    pub fn add_user(&mut self, user: Rc<RefCell<User>>) {
+        let user_place = PlaceUser::new(Rc::downgrade(&user));
+        self.members.push(user_place);
+        self.create_solo_group(user);
     }
 
     pub fn add_admin(&mut self, admin: Rc<RefCell<User>>) {
         let mut admin_user = PlaceUser::new(Rc::downgrade(&admin));
         admin_user.add_admin_role();
         self.admin.push(Rc::clone(&admin));
-        self.members.push(admin_user);
     }
 
     pub fn is_admin(&self, user_id: u64) -> bool {
@@ -324,6 +343,52 @@ impl DefaultPlace {
             if ad.borrow().id() == user_id {return true}
         }
         false
+    }
+
+    pub fn create_group(&mut self, default: bool, user_vec: Vec<Rc<RefCell<User>>>, name: String) -> u64 {
+        let id = self.groups.len() as u64;
+        let d = DefaultPlaceGroup {
+            id,
+            default,
+            members: user_vec.clone(),
+            name,
+            messages: vec![]
+        };
+        self.groups.push(d);
+        id
+    }
+
+    pub fn create_solo_group(&mut self, user: Rc<RefCell<User>>) {
+        let vec = vec![Rc::clone(&user)];
+        let id = self.create_group(true, vec, String::from(user.borrow().name().to_string()));
+        user.borrow_mut().update_def_group(id);
+    }
+
+    pub fn find_group(&self, group_id: u64) -> Option<&DefaultPlaceGroup> {
+        for g in self.groups.iter() {
+            if g.id == group_id {
+                return Some(g)
+            }
+        }
+        None
+    }
+
+    pub fn find_group_mut(&mut self, group_id: u64) -> Option<&mut DefaultPlaceGroup> {
+        for g in self.groups.iter_mut() {
+            if g.id == group_id {
+                return Some(g)
+            }
+        }
+        None
+    }
+
+    pub fn return_group_messages_iter(&self, group_id: u64) -> Result<Iter<PlaceMessage>, &'static str> {
+        if let Some(group) = self.find_group(group_id){
+            Ok(group.messages.iter())
+        }
+        else {
+            Err("Cannot find given group")
+        }
     }
 }
 
@@ -341,6 +406,59 @@ impl PlaceTrait for DefaultPlace {
         }
         None
     }
+}
+
+impl DefaultPlaceGroup {
+    pub fn new(id:u64, default: bool, name: String, members: Vec<Rc<RefCell<User>>>) -> Self {
+        DefaultPlaceGroup {
+            default,
+            id,
+            name,
+            members,
+            messages: vec![]
+        }
+    }
+
+    pub fn is_default(&self) -> bool {
+        self.default
+    }
+
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    pub fn change_name(&mut self, new_name: String) {
+        self.name = new_name;
+    }
+
+    pub fn add_message(&mut self, message: PlaceMessage) {
+        self.messages.push(message);
+    }
+
+    pub fn find_member(&self, user_id: u64) -> bool {
+        for memb in self.members.iter() {
+            if memb.borrow().id() == user_id {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn return_members_vec(&self) -> &Vec<Rc<RefCell<User>>> {
+        &self.members
+    }
+
+    pub fn add_member(&mut self, user: Rc<RefCell<User>>) -> Result<(), &'static str> {
+        if self.default {
+            return Err("Cannot change default group");
+        }
+        if !self.find_member(user.borrow().id()){
+            self.members.push(Rc::clone(&user));
+            user.borrow_mut().data.add_group(self.id);
+        }
+        Ok(())
+    }
+
 }
 
 impl PlaceMessage {

@@ -39,8 +39,8 @@ impl Simulation{
             }
         };
         // Create app admin
-        let id = s.create_user("Admin".to_string(), "***".to_string());
-        s.default_place.add_admin(s.get_user_by_id(id).unwrap());
+        let id = s.create_user("Admin".to_string(), "admin_test@email.io".to_string(), "***".to_string());
+        s.default_place.add_admin(s.get_user_by_id(id.unwrap()).unwrap());
         s
     }
 
@@ -64,18 +64,53 @@ impl Simulation{
     }
 
     // User methods
-    pub fn create_user(&mut self, name: String, pass: String) -> u64 {
+    pub fn create_user(&mut self, login: String, email: String, pass: String) -> Result<u64, &'static str> {
         let num = self.get_next_user_id();
-        let user = User::new(name, pass, num, 0);
+        let user = User::new(login.clone(),email, pass, num, 0);
+        if self.check_if_user_exists_using_login(login) {
+            return Err("User already exists");
+        }
         let user = Rc::from(RefCell::new(user));
         self.members.push(Rc::clone(&user));
         self.add_to_default_place(user);
-        num
+        Ok(num)
     }
 
+    fn check_if_user_exists_using_login(&self, login: String) -> bool {
+        for user in self.members.iter() {
+            if user.borrow().data.login() == login {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    #[allow(dead_code)]
+    fn check_if_user_exists_using_id(&self, id: u64) -> bool {
+        for user in self.members.iter() {
+            if user.borrow().id() == id {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// It clones bro
     pub fn get_user_by_id(&self, id: u64) -> Result<Rc<RefCell<User>>, &'static str> {
         for x in self.members.iter(){
             if x.borrow().id() == id{
+                return Ok(Rc::clone(&x))
+            }
+        }
+        Err("Cannot find the user. Make sure you have the correct id.")
+    }
+
+    /// It clones bro, too
+    pub fn get_user_by_login(&self, login: &str) -> Result<Rc<RefCell<User>>, &'static str> {
+        for x in self.members.iter(){
+            if x.borrow().login().trim() == login{
                 return Ok(Rc::clone(&x))
             }
         }
@@ -86,8 +121,25 @@ impl Simulation{
         self.current_user.upgrade()
     }
 
+    // Group methods
+    pub fn return_current_group(&self) -> u64 {
+        self.current_user.upgrade().unwrap().borrow().group
+    }
+
+    pub fn add_user_to_current_group(&mut self, user: Rc<RefCell<User>>) -> Result<(), &'static str> {
+        self.default_place.find_group_mut(self.return_current_group()).unwrap().add_member(user)
+    }
+
+    pub fn create_new_group(&mut self, user_vec: Vec<Rc<RefCell<User>>>, name: String) -> u64 {
+        let id = self.default_place.create_group(false, user_vec.clone(), name);
+        for user in user_vec {
+            user.borrow_mut().data.add_group(id);
+        }
+        id
+    }
+
     // Place methods
-    fn get_default_place(&self) -> &place::DefaultPlace {
+    pub fn get_default_place(&self) -> &place::DefaultPlace {
         &self.default_place
     }
 
@@ -109,6 +161,15 @@ impl Simulation{
         Err(&self.default_place)
     }
 
+    pub fn get_place_by_code(&self, code: String) -> Result<Rc<RefCell<Place>>, &place::DefaultPlace> {
+        for x in self.places.iter(){
+            if x.borrow().return_invite_infinite_code().trim() == code.trim(){
+                return Ok(Rc::clone(x))
+            }
+        }
+        Err(&self.default_place)
+    }
+
     pub fn return_current_place(&self) -> Result<Rc<RefCell<Place>>, &place::DefaultPlace> {
         let user = self.current_user.upgrade().unwrap();
         let id = user.borrow().place;
@@ -120,15 +181,27 @@ impl Simulation{
         Err(&self.default_place)
     }
 
-    pub fn create_place(&mut self, name: String, admin_id: u64) -> u64 {
+    pub fn create_place(&mut self, name: String, admin_id: u64) -> Result<u64, &'static str> {
         let admin = match self.get_user_by_id(admin_id) {
             Ok(x) => Some(x),
             Err(_) => None
         };
         let num = self.get_next_place_id();
         let place = Place::new(name, admin, num);
+        if self.check_if_place_already_exists(place.return_invite_infinite_code()) {
+            return Err("Place already exists, which is VERY rare")
+        }
         self.places.push(Rc::from(RefCell::new(place)));
-        num
+        Ok(num)
+    }
+
+    fn check_if_place_already_exists(&self, code: String) -> bool {
+        for places in self.places.iter() {
+            if places.borrow().return_invite_infinite_code() == code {
+                return true;
+            }
+        }
+        false
     }
 
     pub fn return_current_user_perms(&self) -> RolePerms {
@@ -136,7 +209,7 @@ impl Simulation{
             Ok(place) => {
                 return place.borrow().return_perms(self.return_current_user().unwrap().borrow().id());
             }
-            Err(def) =>{
+            Err(_def) =>{
                 if self.default_place.is_admin(self.current_user.upgrade().unwrap().borrow().id()) {
                     return RolePerms::new_admin()
                 }
@@ -157,14 +230,15 @@ impl Simulation{
 
     pub fn log_in(&mut self, login: String, password: String) -> Result<&'static str, &'static str>{
         for user in self.members.iter() {
-            if user.borrow().login() == login
+            if user.borrow().login() == login || user.borrow().email() == login
             {
                 if user.borrow().pass() == password {
                     self.current_user = Rc::downgrade(user);
+                    user.borrow().show_user_data();
                     return Ok("Logged in successfuly.")
                 }
                 else {
-                    return Err("Logging failed. Wrong login or password.")
+                    return Err("Logging failed. Wrong logging data.")
                 }
             }
         }
@@ -172,6 +246,12 @@ impl Simulation{
     }
 
     pub fn log_off(&mut self){
+        // Reset current place and group
+        let curr_user = self.current_user.upgrade().unwrap();
+        let def_group = curr_user.borrow().return_def_group();
+        curr_user.borrow_mut().group = def_group;
+        curr_user.borrow_mut().place = 0;
+        // Oversave the current_user
         self.current_user = Weak::new();
         println!("Successfuly log off!");
     }
@@ -204,8 +284,34 @@ impl Simulation{
                 return Err("Cannot find place. Setting default")
             }
         };
-        user.borrow_mut().place = place.borrow().id();
+        // Check if it's first time
+        self.first_time_joining_check(place, user);
         Ok(())
+    }
+
+    pub fn change_place_code(&mut self, place_code: String) -> Result<(), &'static str>{
+        let user =  self.current_user.upgrade().unwrap();
+        if place_code.is_empty(){
+            return Err("Code is empty");
+        }
+        let place = match self.get_place_by_code(place_code) {
+            Ok(x) => x,
+            Err(_) => {
+                user.borrow_mut().place = 0;
+                return Err("Cannot find place. Setting default")
+            }
+        };
+        // Check if it's first time
+        self.first_time_joining_check(place, user);
+        Ok(())
+    }
+
+    fn first_time_joining_check(&mut self, place: Rc<RefCell<Place>>, user: Rc<RefCell<User>>) {
+        // Check if it's first time
+        if let None = place.borrow().find_user_by_id(user.borrow().id()) {
+            place.borrow_mut().add_user(Rc::clone(&user));
+        }
+        user.borrow_mut().place = place.borrow().id();
     }
 
     pub fn reset_place(&mut self){
@@ -218,18 +324,36 @@ impl Simulation{
             None => {return;}
         };
         let id = self.current_user.upgrade().unwrap().borrow().place;
-        let place = Rc::clone(&self.get_place_by_id(id).unwrap());
-        io::sent_message(&user.borrow(), &place.borrow(), message);
-        let mess = place::PlaceMessage::new(&user, String::from(message), SystemTime::now());
-        place.borrow_mut().add_message(mess);
+        match self.get_place_by_id(id) {
+            Ok(place) => {
+                io::sent_message(&user.borrow(), place.borrow().name(), message);
+                let mess = place::PlaceMessage::new(&user, String::from(message), SystemTime::now());
+                place.borrow_mut().add_message(mess);
+            }
+            Err (_) => {
+                io::sent_message(&user.borrow(), "Random group".to_string() , message);
+                let group_id = self.current_user.upgrade().unwrap().borrow().group;
+                let group = match self.get_default_place_mut().find_group_mut(group_id) {
+                    Some(g) => g,
+                    None => {
+                        println!("Cannot find group");
+                        return;
+                    }
+                };
+                let mess = place::PlaceMessage::new(&user, String::from(message), SystemTime::now());
+                group.add_message(mess);
+            }
+        }
     }
 
     pub fn return_current_place_user_roles(&self, user_id: u64) -> Result<Vec<place::roles::RoleTemplate>, &'static str> {
+        dbg!(&user_id);
         let place = self.return_current_place().unwrap();
         let roles = match place.borrow().return_user_roles(user_id) {
             Ok(x) => x.clone(),
             Err(err) => {return Err(err);}
         };
+        dbg!(&roles);
         Ok(roles)
     }
 
@@ -252,10 +376,20 @@ impl Simulation{
     }
 
     pub fn return_current_place_messages(&self) -> Vec<String> {
-        let place = self.return_current_place().unwrap();
         let mut vec: Vec<String> = vec![];
-        for mesg in place.borrow().messages.iter() {
-            vec.push(format!("{mesg}"));
+        match self.return_current_place(){
+            Ok(place) => {
+                for mesg in place.borrow().messages.iter() {
+                    vec.push(format!("{mesg}"));
+                }
+            }
+            Err(def) => {
+                let group_id = self.current_user.upgrade().unwrap().borrow().group;
+                let mess_iter = def.return_group_messages_iter(group_id).unwrap();
+                for mesg in mess_iter {
+                    vec.push(format!("{mesg}"));
+                }
+            }
         }
         vec
     }
@@ -323,7 +457,9 @@ mod testing{
     #[test]
     fn check_logged(){
         let mut sim = Simulation::new();
-        sim.create_user("test".to_string(), "1234".to_string());
+        if let Err(_) = sim.create_user("test".to_string(), "test@test.pl".to_string(), "1234".to_string()) {
+            panic!();
+        }
         match sim.log_in("test".to_string(), "1234".to_string()) {
             Ok(x) => x,
             Err(x) => {panic!("{x}")}
@@ -333,8 +469,8 @@ mod testing{
     #[test]
     fn check_user_partialeq(){
         let place = Rc::new(RefCell::new(Place::new("test_place".to_string(), None, 1)));
-        let user1 = User::new("test1".to_string(), "123".to_string(), 1, place.borrow().id());
-        let user2 = User::new("test2".to_string(), "321".to_string(), 1, place.borrow().id());
+        let user1 = User::new("test1".to_string(), "test@test.pl".to_string(), "123".to_string(), 1, place.borrow().id());
+        let user2 = User::new("test2".to_string(), "debug@debug.pl".to_string(), "321".to_string(), 1, place.borrow().id());
 
         assert_eq!(user1, user2);
     }
@@ -342,8 +478,8 @@ mod testing{
     #[test]
     fn check_admin() {
         let mut sim = Simulation::new();
-        let id = sim.create_user("test".to_string(), "1234".to_string());
-        let place_id = sim.create_place("Debug".to_string(), id);
+        let id = sim.create_user("test".to_string(), "test@test.pl".to_string(), "1234".to_string()).unwrap();
+        let place_id = sim.create_place("Debug".to_string(), id).unwrap();
         assert!(sim.is_admin_in_server(id, place_id));
     }
 }
